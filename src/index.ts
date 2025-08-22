@@ -116,8 +116,6 @@ const toSentryEvent = (log: DDLog): SentryEvent => {
 			dd_source: (log.source as string) || 'datadog',
 			function_path: functionPath,
 		},
-		// Optional: stable grouping by service + message. Adjust to taste.
-		fingerprint: ['log', service, msg],
 		extra: {
 			datadog_id: log._id,
 			topic: log.attributes?.topic,
