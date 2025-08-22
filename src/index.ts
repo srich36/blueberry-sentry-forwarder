@@ -98,9 +98,82 @@ const toIso = (d?: string | number): string | undefined => {
 	}
 };
 
+type NormalizedMessage = {
+	message: string;
+	extractedIds: Record<string, string>;
+};
+
+const normalizeMessage = (message: string): NormalizedMessage => {
+	const extractedIds: Record<string, string> = {};
+	let normalized = message;
+	let idCounter = 0;
+
+	// Convex IDs (32 character alphanumeric strings)
+	normalized = normalized.replace(/\b[a-z0-9]{32}\b/g, (match) => {
+		const key = `convex_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return '<convex_id>';
+	});
+
+	// Compound numeric IDs (e.g., 157322910959964_1171172118373752)
+	normalized = normalized.replace(/\b\d{10,}_\d{10,}\b/g, (match) => {
+		const key = `compound_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return '<compound_id>';
+	});
+
+	// UUIDs
+	normalized = normalized.replace(
+		/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+		(match) => {
+			const key = `uuid_${++idCounter}`;
+			extractedIds[key] = match;
+			return '<uuid>';
+		}
+	);
+
+	// MongoDB ObjectIds (24 hex characters)
+	normalized = normalized.replace(/\b[0-9a-f]{24}\b/gi, (match) => {
+		const key = `object_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return '<object_id>';
+	});
+
+	// Hex IDs with prefix
+	normalized = normalized.replace(/(0x|#)[0-9a-f]{6,}/gi, (match) => {
+		const key = `hex_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return '<hex_id>';
+	});
+
+	// IDs with prefixes (user_12345, order-98765, etc.)
+	normalized = normalized.replace(/\b(user|order|item|session|request|id)[_-]\d{3,}\b/gi, (match) => {
+		const prefix = match.split(/[_-]/)[0];
+		const key = `${prefix}_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return `${prefix}_<id>`;
+	});
+
+	// Standalone long numeric IDs (10+ digits)
+	normalized = normalized.replace(/\b\d{10,}\b/g, (match) => {
+		const key = `numeric_id_${++idCounter}`;
+		extractedIds[key] = match;
+		return '<numeric_id>';
+	});
+
+	return {
+		message: normalized,
+		extractedIds,
+	};
+};
+
 const toSentryEvent = (log: DDLog): SentryEvent => {
 	const rawMsg = log.message ?? log.msg ?? `${JSON.stringify(log)}`;
 	const msg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
+	
+	// Normalize the message to improve fingerprinting
+	const { message: normalizedMsg, extractedIds } = normalizeMessage(msg);
+	
 	const date = log.date ?? log.timestamp ?? log.attributes?.timestamp;
 	const lvl = log.level ?? log.status ?? log.attributes?.log_level ?? log.attributes?.level;
 
@@ -126,7 +199,7 @@ const toSentryEvent = (log: DDLog): SentryEvent => {
 	const requestId = log.attributes?.function?.request_id as string | undefined;
 
 	return {
-		message: msg.slice(0, 8000), // keep the issue title readable
+		message: normalizedMsg.slice(0, 8000), // keep the issue title readable
 		level: mapLevel(lvl),
 		timestamp: toIso(date),
 		platform: 'other',
@@ -150,6 +223,10 @@ const toSentryEvent = (log: DDLog): SentryEvent => {
 				mutation_retry_count: mutationRetryCount,
 				request_id: requestId,
 			},
+			// Preserve extracted IDs for debugging
+			extracted_ids: extractedIds,
+			// Original message for reference
+			original_message: msg.slice(0, 2000),
 			// keep an eye on size — trim if you hit Sentry item limits (~1MB)
 			attributes: log.attributes,
 		},
