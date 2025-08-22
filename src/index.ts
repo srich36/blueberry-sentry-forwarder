@@ -26,11 +26,27 @@ type DDLog = {
 		level?: string;
 		log_level?: string | number;
 		topic?: string;
-		function?: { path?: string };
+		function?: { path?: string; type?: string; mutation_retry_count?: number; request_id?: string };
 		convex?: Record<string, unknown>;
 		[k: string]: unknown;
 	} & Record<string, unknown>;
 	[k: string]: unknown;
+};
+
+type SentryStackFrame = {
+	filename: string;
+	function?: string;
+	lineno?: number;
+	colno?: number;
+	in_app?: boolean;
+};
+
+type SentryException = {
+	type: string;
+	value: string;
+	stacktrace?: {
+		frames: SentryStackFrame[];
+	};
 };
 
 type SentryEvent = {
@@ -44,6 +60,9 @@ type SentryEvent = {
 	tags?: Record<string, string>;
 	fingerprint?: string[];
 	extra?: Record<string, unknown>;
+	exception?: {
+		values: SentryException[];
+	};
 };
 
 const te = new TextEncoder();
@@ -102,6 +121,9 @@ const toSentryEvent = (log: DDLog): SentryEvent => {
 	};
 
 	const functionPath = (log.attributes?.function as { path?: string } | undefined)?.path || 'n/a';
+	const functionType = log.attributes?.function?.type as string | undefined;
+	const mutationRetryCount = log.attributes?.function?.mutation_retry_count as number | undefined;
+	const requestId = log.attributes?.function?.request_id as string | undefined;
 
 	return {
 		message: msg.slice(0, 8000), // keep the issue title readable
@@ -115,11 +137,19 @@ const toSentryEvent = (log: DDLog): SentryEvent => {
 			host,
 			dd_source: (log.source as string) || 'datadog',
 			function_path: functionPath,
+			function_type: functionType || 'unknown',
+			has_retry: mutationRetryCount ? 'true' : 'false',
 		},
 		extra: {
 			datadog_id: log._id,
 			topic: log.attributes?.topic,
 			convex: log.attributes?.convex,
+			function_metadata: {
+				path: functionPath,
+				type: functionType,
+				mutation_retry_count: mutationRetryCount,
+				request_id: requestId,
+			},
 			// keep an eye on size — trim if you hit Sentry item limits (~1MB)
 			attributes: log.attributes,
 		},
