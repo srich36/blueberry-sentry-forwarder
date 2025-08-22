@@ -80,7 +80,7 @@ const toIso = (d?: string | number): string | undefined => {
 };
 
 const toSentryEvent = (log: DDLog): SentryEvent => {
-	const rawMsg = log.message ?? 'datadog log';
+	const rawMsg = log.message ?? log.msg ?? `${JSON.stringify(log)}`;
 	const msg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
 	const date = log.date ?? log.timestamp ?? log.attributes?.timestamp;
 	const lvl = log.level ?? log.status ?? log.attributes?.log_level ?? log.attributes?.level;
